@@ -1,0 +1,8 @@
+# Render blueprint: a free web service that runs the game and room server together.
+# Rooms live in memory, so keep this at a single instance.
+services:
+  - type: web
+    name: langur-burja
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
