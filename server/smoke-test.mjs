@@ -118,7 +118,7 @@ console.log('✓ bad token rejected');
   assert.equal(host.state.rules.limit, 0);
   host.send({ t: 'rules', rules: { limit: 500, payout: 'bogus' } });
   await host.until((c) => c.state.rules.limit === 500);
-  assert.equal(host.state.rules.payout, 'perdie');
+  assert.equal(host.state.rules.payout, DEFAULT_RULES.payout);
   // the limit is enforced per figure
   host.send({ t: 'bet', face: 'paan', amount: 500 });
   await host.until((c) => c.state.players.find((p) => p.id === c.you).bets.paan === 500);
@@ -128,12 +128,12 @@ console.log('✓ bad token rejected');
   // rules lock once bets exist
   host.send({ t: 'rules', rules: { payout: 'once' } });
   await host.until((c) => c.errors.length > e + 1);
-  assert.equal(host.state.rules.payout, 'perdie');
+  assert.equal(host.state.rules.payout, DEFAULT_RULES.payout);
   host.send({ t: 'clear' });
   host.send({ t: 'rules', rules: { limit: 0, payout: 'once' } });
   await host.until((c) => c.state.rules.payout === 'once');
-  host.send({ t: 'rules', rules: { payout: 'perdie' } });
-  await host.until((c) => c.state.rules.payout === 'perdie');
+  host.send({ t: 'rules', rules: { payout: DEFAULT_RULES.payout } });
+  await host.until((c) => c.state.rules.payout === DEFAULT_RULES.payout);
   console.log('✓ house rules: host-only, validated, per-figure limit, locked after bets');
 }
 
@@ -296,6 +296,54 @@ console.log('✓ bad token rejected');
   host.send({ t: 'rules', rules: { voice: 'ptt' } });
   await host.until((c) => c.state.rules.voice === 'ptt');
   console.log('✓ voice chat: roster, newcomer calls existing, relay limited to the call, spectators listen, host rule');
+}
+
+// ── avatars, room title, tournament, analytics ──
+{
+  // fresh room so the earlier sections' state does not interfere
+  const h = client('Host2'); await h.open;
+  h.send({ t: 'create', name: 'Maya', title: '  Dashain <b>family</b>  ', avatar: '🦁' });
+  await h.until((c) => c.state && c.you);
+  assert.ok(!h.state.title.includes('<'), 'title is stripped of markup');
+  assert.equal(h.state.players[0].avatar, '🦁');
+  const g = client('Guest2'); await g.open;
+  g.send({ t: 'join', code: h.code, name: 'Ram', avatar: 'not-an-avatar' });
+  await g.until((c) => c.state && c.you);
+  assert.ok(g.state.players.find((p) => p.name === 'Ram').avatar.length > 0, 'an invalid avatar falls back to a random allowed one');
+
+  // 5-round tournament: everyone has equal chips, no refills, final standings, late joiners cannot play
+  h.send({ t: 'rules', rules: { rounds: 5 } });
+  await h.until((c) => c.state.rules.rounds === 5);
+  const playRound = async () => {
+    const roller = [h, g].find((c) => c.you === h.state.rollerId);
+    roller.send({ t: 'bet', face: 'paan', amount: 10 });
+    await roller.until((c) => c.state.players.find((p) => p.id === c.you).bets.paan >= 10);
+    roller.send({ t: 'roll' });
+    await h.until((c) => c.state.phase === 'result', 8000);
+    roller.send({ t: 'next' });
+  };
+  for (let i = 1; i <= 5; i += 1) {
+    assert.equal(h.state.round, i);
+    await playRound();
+    if (i < 5) await h.until((c) => c.state.phase === 'betting' && c.state.round === i + 1);
+  }
+  await h.until((c) => c.state.phase === 'final');
+  assert.equal(h.state.history.length, 5);
+  const late = client('Late'); await late.open;
+  late.send({ t: 'join', code: h.code, name: 'Late' });
+  await late.until((c) => c.errors.length > 0);
+  const nR = h.errors.length;
+  h.send({ t: 'rebuy' });
+  await h.until((c) => c.errors.length > nR);
+  g.send({ t: 'again' });                                     // only the host may restart
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(h.state.phase, 'final');
+  h.send({ t: 'again' });
+  await h.until((c) => c.state.phase === 'betting' && c.state.round === 1);
+  assert.ok(h.state.players.every((p) => p.balance === 5000 && p.total === 0), 'play again resets chips equally');
+  assert.equal(h.state.history.length, 0);
+  console.log('✓ avatars, room title, 5-round tournament (final, no late join, no rebuy, play again)');
+  for (const c of [h, g, late]) c.ws.close();
 }
 
 for (const c of [host, back, ghost, globalThis.guest]) c.ws.close();

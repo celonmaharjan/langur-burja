@@ -89,7 +89,7 @@ export function Standings({ players, you }) {
         {ranked.map((p, i) => (
           <li key={p.id} className={p.id === you ? 'me' : ''}>
             <span className={`rank r${played ? i + 1 : 0}`}>{i + 1}</span>
-            <span className="sname">{p.name}{p.id === you && <em className="tag">{t('room.you')}</em>}</span>
+            <span className="sname">{p.avatar && <span className="av">{p.avatar}</span>} {p.name}{p.id === you && <em className="tag">{t('room.you')}</em>}</span>
             <span className="swins">{t('stand.wins', { n: p.wins })}</span>
             <span className={`net ${p.total > 0 ? 'up' : p.total < 0 ? 'down' : ''}`}>
               {p.total > 0 ? '+' : p.total < 0 ? '−' : ''}{rs(Math.abs(p.total))}

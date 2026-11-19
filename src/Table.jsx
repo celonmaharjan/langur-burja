@@ -5,6 +5,7 @@ import FaceIcon from './FaceIcon.jsx';
 import Die3D, { impacts } from './Die3D.jsx';
 import { useT } from './i18n.jsx';
 import { sfx } from './sound.js';
+import { ShareResultButton } from './ShareBar.jsx';
 
 /**
  * The visual table, shared by solo practice and private rooms. It owns no game state:
@@ -13,13 +14,13 @@ import { sfx } from './sound.js';
 export default function Table(props) {
   const {
     dice, rollId, rolling, result, hint, bets, others = {}, balance, round,
-    chip, setChip, locked, countdown, watching, onPlace, onUndo, onClear, onRebet, onRoll,
+    chip, setChip, locked, countdown, watching, roundLabel, shareCtx, onPlace, onUndo, onClear, onRebet, onRoll,
     rollLabel, rollDisabled, canUndo, canClear, canRebet,
   } = props;
   const { t, rs, lang, faceName, faceAlt } = useT();
 
   const totalBet = sumBets(bets);
-  const hitKeys = result ? result.lines.filter((l) => l.matches > 0).map((l) => l.key) : [];
+  const hitKeys = result ? result.lines.filter((l) => l.won).map((l) => l.key) : [];
 
   // How many times each figure came up on the dice currently on the table.
   const landed = rollId > 0 && !rolling;
@@ -79,7 +80,7 @@ export default function Table(props) {
         <div className="statbar">
           {!watching && <div><span>{t('stat.balance')}</span><b>{rs(balance)}</b></div>}
           {!watching && <div><span>{t('stat.bet')}</span><b>{rs(totalBet)}</b></div>}
-          <div><span>{t('stat.round')}</span><b>#{round}</b></div>
+          <div><span>{t('stat.round')}</span><b>{roundLabel ?? `#${round}`}</b></div>
           {countdown != null && (
             <div className={`timer ${countdown <= 5 ? 'urgent' : ''}`} role="timer" aria-label={t('timer.label')}>
               <span>{t('timer.label')}</span><b>{countdown}s</b>
@@ -110,6 +111,11 @@ export default function Table(props) {
         </div>
 
         <div className={`banner ${banner.kind}`} role="status">{banner.text}</div>
+        {landed && shareCtx && (
+          <div className="share-row">
+            <ShareResultButton build={() => ({ dice, net: watching ? undefined : result?.net, round, title: shareCtx.title, code: shareCtx.code })} />
+          </div>
+        )}
 
         {!watching && (
           <button className="roll" onClick={onRoll} disabled={rollDisabled}>
@@ -150,8 +156,8 @@ export default function Table(props) {
                 <span className={`stake ${stake ? 'on' : ''}`}>{stake ? rs(stake) : '—'}</span>
                 {friends > 0 && <span className="friends">{t(watching ? 'board.players' : 'board.friends', { amt: rs(friends) })}</span>}
                 {line && !rolling && (
-                  <span className={`cell-result ${line.matches ? 'up' : 'down'}`}>
-                    {line.matches ? `×${line.matches} · +${rs(line.stake * line.matches)}` : `−${rs(line.stake)}`}
+                  <span className={`cell-result ${line.won ? 'up' : 'down'}`}>
+                    {line.won ? `×${line.matches} · +${rs(line.back - line.stake)}` : `−${rs(line.stake)}`}
                   </span>
                 )}
               </button>

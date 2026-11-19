@@ -95,6 +95,24 @@ try {
     assert.equal(await a.text('.hero h1'), 'Langur Burja');
   });
 
+  await step('support dialog shows the QR; daily bonus adds chips once; theme switches', async () => {
+    await a.click('.support-link');
+    await a.waitFor(`!!document.querySelector('.support-qr')`);
+    await a.waitFor(`document.querySelector('.support-qr').complete && document.querySelector('.support-qr').naturalWidth > 100`);
+    await a.click('.dialog .icon-btn');
+    const before = await a.js(`JSON.parse(localStorage.getItem('langur-burja:solo:v2') ?? '{"balance":5000}').balance`);
+    await a.click('.daily .primary');
+    await a.waitFor(`!document.querySelector('.daily .primary')`);
+    const after = await a.js(`JSON.parse(localStorage.getItem('langur-burja:solo:v2')).balance`);
+    assert.equal(after - before, 500, 'first daily bonus is Rs 500');
+    await a.click('.theme-wrap .icon-btn');
+    await a.click('.theme-menu button', 1);
+    assert.equal(await a.js(`document.documentElement.dataset.theme`), 'dashain');
+    await a.click('.theme-wrap .icon-btn');
+    await a.click('.theme-menu button', 0);
+    assert.equal(await a.js(`document.documentElement.dataset.theme`), 'classic');
+  });
+
   await step('solo: bet, roll, six dice land and the counts add up to 6', async () => {
     await a.click('button.mode', 0);
     await a.click('.chip-100');
@@ -148,6 +166,15 @@ try {
     assert.deepEqual(dc, da);
   });
 
+  await step('invite buttons carry the room code; share-result makes a picture; avatars show', async () => {
+    const wa = await a.js(`document.querySelector('.sharebar a.wa').href`);
+    assert.ok(decodeURIComponent(wa).includes(code), 'WhatsApp link contains the room code');
+    assert.ok(await a.js(`document.querySelector('.sharebar a.vb').href`).then((h) => h.startsWith('viber://')));
+    assert.ok(await a.js(`document.querySelectorAll('.players .av').length`) >= 2, 'players have avatars');
+    await a.click('.share-result');
+    await a.waitFor(`!!document.querySelector('.share-row .fine')`);       // headless has no share sheet, so it downloads
+  });
+
   await step('standings, history and the spectator count update', async () => {
     assert.equal(await a.js(`document.querySelectorAll('.standings li').length`), 2);
     assert.match(await a.text('.history li'), /Round 1/);
@@ -168,6 +195,47 @@ try {
     await b.click('.react', 1);
     await a.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
     await c.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
+  });
+
+  await step('tournament: 5 rounds with equal chips, final standings, play again', async () => {
+    const d = await openTab('D', false);            // its own tabs, so the voice step below still has its room
+    await d.goto(BASE);
+    await d.click('button.mode', 1);
+    await d.type('.field input', 'Asha');
+    await d.type('.lobby-box .field input', 'Test Family');
+    await d.click('.lobby-box button', 0);
+    await d.waitFor(`!!document.querySelector('.room-code')`);
+    assert.equal(await d.text('.room-title'), 'Test Family');
+    const tcode = await d.text('.room-code');
+    await d.js(`[...document.querySelectorAll('.houserules .seg button')].find((x) => x.textContent === '5 rounds').click()`);
+    await d.waitFor(`document.querySelector('.statbar').innerText.includes('1/5')`);
+    const f = await openTab('F', false);
+    await f.goto(`${BASE}/?room=${tcode}`);
+    await f.type('.field input', 'Bikash');
+    await f.js(`document.querySelectorAll('.lobby-box')[1].querySelector('button').click()`);
+    await f.waitFor(`document.querySelectorAll('.players li').length === 2`);
+    for (let i = 1; i <= 5; i += 1) {
+      const isRoller = (t) => t.js(`document.querySelector('.roll').innerText.startsWith('Roll dice')`);
+      const who = (await isRoller(d)) ? d : f;
+      await who.click('.chip-100'); await who.click('.cell', 2);
+      await who.waitFor(`!document.querySelector('.roll').disabled`);
+      await who.click('.roll');
+      await who.waitFor(`document.querySelectorAll('.count-badge').length === 6`, 10000);
+      await who.waitFor(`document.querySelector('.roll').innerText.startsWith('Next round')`, 10000);
+      await who.click('.roll');                     // "Next round"; after round 5 this opens the final standings
+      if (i < 5) await d.waitFor(`document.querySelector('.statbar').innerText.includes('${i + 1}/5')`, 10000);
+    }
+    await d.waitFor(`!!document.querySelector('.tour-final')`, 10000);
+    await f.waitFor(`!!document.querySelector('.tour-final')`, 10000);
+    assert.match(await d.text('.tour-final .winner'), /wins!/);
+    assert.equal(await d.js(`document.querySelectorAll('.tour-final .standings li').length`), 2);
+    assert.equal(await f.js(`!document.querySelector('.tour-final .primary')`), true, 'only the host can restart');
+    await d.click('.tour-final .share-result');
+    await d.waitFor(`!!document.querySelector('.tour-final .fine')`);                 // picture downloaded (no share sheet in headless)
+    await d.click('.tour-final .primary');
+    await d.waitFor(`document.querySelector('.statbar').innerText.includes('1/5')`);
+    assert.equal(await d.js(`!document.querySelector('.tour-final')`), true);
+    assert.match(await d.text('.statbar'), /5,000/);
   });
 
   await step('voice chat: a player talks and the other player and the spectator hear and see it', async () => {

@@ -140,8 +140,8 @@ export function useRoom() {
   return {
     subscribe,
     status, state, you, role, lan, error, said, send, leave,
-    create: (name) => start({ t: 'create', name }),
-    join: (code, name) => start({ t: 'join', code, name }),
+    create: (name, title, avatar) => start({ t: 'create', name, title, avatar }),
+    join: (code, name, avatar) => start({ t: 'join', code, name, avatar }),
     watch: (code, name) => start({ t: 'join', code, name, watch: true }),
   };
 }

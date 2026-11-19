@@ -28,6 +28,7 @@ It uses whatever address you opened, so friends get a working link. Stop the tun
 | `PORT` | `3001` | Port to listen on (the Dockerfile sets `8080`) |
 | `MAX_ROOMS` | `200` | New rooms are refused beyond this |
 | `MAX_CONN_PER_IP` | `30` | Simultaneous connections allowed per client address |
+| `ADMIN_KEY` | *(unset)* | Turns on `/stats?key=…`: anonymous daily counters (visits, rooms, joins, rounds, tournaments, voice). No names, cookies or addresses are stored. Unset = the page does not exist |
 | `DATA_FILE` | `data/rooms.json` | Where rooms are saved. `off` disables saving. Point it at a persistent disk/volume on a host, otherwise a redeploy wipes it |
 
 Play money only. Only room state (names, play-money balances, bets) is saved; there are no accounts or passwords.

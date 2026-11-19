@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  CHIPS, DEFAULT_RULES, SAY_IDS, DICE_COUNT, cleanRules, FACE_KEYS, MAX_PLAYERS, RESULT_MS, ROLL_MS, START_BANKROLL, settle, sumBets,
+  AVATARS, CHIPS, DEFAULT_RULES, SAY_IDS, DICE_COUNT, cleanRules, FACE_KEYS, MAX_PLAYERS, RESULT_MS, ROLL_MS, START_BANKROLL, settle, sumBets,
 } from '../shared/game.js';
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -30,11 +30,36 @@ const PERSIST = DATA_FILE !== 'off';
 /** @type {Map<string, any>} */
 const rooms = new Map();
 
+// ───────────────────────────── privacy-friendly analytics ─────────────────────────────
+// Only anonymous daily counters (no cookies, no IP addresses, no names). Read them at /stats?key=ADMIN_KEY.
+const ADMIN_KEY = process.env.ADMIN_KEY ?? '';
+const STATS_FILE = PERSIST ? path.join(path.dirname(DATA_FILE), 'stats.json') : null;
+const stats = (() => {
+  try { const d = JSON.parse(readFileSync(STATS_FILE, 'utf8')); if (d?.days) return d; } catch { /* first run */ }
+  return { days: {} };
+})();
+let statsTimer = null;
+function bump(name) {
+  const day = new Date().toISOString().slice(0, 10);
+  const d = (stats.days[day] ??= {});
+  d[name] = (d[name] ?? 0) + 1;
+  const keep = Object.keys(stats.days).sort().slice(-90);        // keep three months
+  for (const k of Object.keys(stats.days)) if (!keep.includes(k)) delete stats.days[k];
+  if (STATS_FILE && !statsTimer) {
+    statsTimer = setTimeout(() => {
+      statsTimer = null;
+      try { mkdirSync(path.dirname(STATS_FILE), { recursive: true }); writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { /* not critical */ }
+    }, 5000);
+    statsTimer.unref?.();
+  }
+}
+
 // ───────────────────────────── helpers ─────────────────────────────
 const send = (ws, obj) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); };
 // `code` lets the client show the message in the player's chosen language; `msg` is the English fallback.
 const fail = (ws, code, msg, fatal = false) => send(ws, { t: 'error', code, msg, fatal });
 const cleanName = (s) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16);
+const cleanTitle = (s) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 24);
 const cleanCode = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
 
 function newCode() {
@@ -84,6 +109,7 @@ function publicState(room) {
     round: room.round,
     hostId: room.hostId,
     rollerId: rollerOf(room),
+    title: room.title,
     watchers: room.watchers.size,
     voice: [...room.voice].map((id) => {
       const p = room.players.get(id);
@@ -103,6 +129,7 @@ function publicState(room) {
       connected: p.connected,
       result: p.result,
       hasLast: sumBets(p.lastBets) > 0,
+      avatar: p.avatar,
       total: p.total,          // session profit / loss across all rounds
       wins: p.wins,
     })),
@@ -129,7 +156,7 @@ function addWatcher(room, ws, name) {
   return watcher;
 }
 
-function addPlayer(room, ws, name) {
+function addPlayer(room, ws, name, avatar) {
   let finalName = name;
   const taken = new Set([...room.players.values()].map((p) => p.name.toLowerCase()));
   for (let n = 2; taken.has(finalName.toLowerCase()); n += 1) finalName = `${name.slice(0, 13)} ${n}`;
@@ -137,6 +164,7 @@ function addPlayer(room, ws, name) {
     id: randomBytes(4).toString('hex'),
     token: randomBytes(16).toString('hex'),
     name: finalName,
+    avatar: AVATARS.includes(avatar) ? avatar : AVATARS[randomInt(AVATARS.length)],
     balance: START_BANKROLL,
     total: 0,
     wins: 0,
@@ -209,7 +237,24 @@ function startNextRound(room) {
   broadcast(room);
 }
 
+const isLastRound = (room) => room.rules.rounds > 0 && room.round >= room.rules.rounds;
+
+// After a result is shown: next betting round, or the final standings when a tournament has run its rounds.
+function afterResult(room) {
+  if (isLastRound(room)) finishTournament(room);
+  else startNextRound(room);
+}
+
+function finishTournament(room) {
+  clearTimeout(room.timer);
+  stopBetTimer(room);
+  room.phase = 'final';
+  bump('tournaments');
+  broadcast(room);
+}
+
 function settleRoom(room) {
+  bump('rounds');
   const results = [];
   for (const p of room.players.values()) {
     const s = settle(p.bets, room.dice, room.rules);
@@ -225,7 +270,7 @@ function settleRoom(room) {
   room.history.unshift({ round: room.round, dice: room.dice, results });
   room.phase = 'result';
   broadcast(room);
-  room.timer = setTimeout(() => startNextRound(room), RESULT_MS);
+  room.timer = setTimeout(() => afterResult(room), RESULT_MS);
 }
 
 const hasStake = (room) => [...room.players.values()].some((p) => sumBets(p.bets) > 0);
@@ -258,11 +303,11 @@ function snapshot() {
     version: 1,
     savedAt: Date.now(),
     rooms: [...rooms.values()].map((r) => ({
-      code: r.code, phase: r.phase, round: r.round, hostId: r.hostId, rollerId: r.rollerId, rules: r.rules,
+      code: r.code, title: r.title ?? '', phase: r.phase, round: r.round, hostId: r.hostId, rollerId: r.rollerId, rules: r.rules,
       dice: r.dice, rollId: r.rollId, history: r.history.slice(0, 12), sayN: r.sayN ?? 0,
       closesIn: r.deadline ? Math.max(0, r.deadline - Date.now()) : null,
       players: [...r.players.values()].map((p) => ({
-        id: p.id, token: p.token, name: p.name, balance: p.balance, total: p.total, wins: p.wins,
+        id: p.id, token: p.token, name: p.name, avatar: p.avatar, balance: p.balance, total: p.total, wins: p.wins,
         bets: p.bets, log: p.log, lastBets: p.lastBets, result: p.result,
       })),
     })),
@@ -298,7 +343,7 @@ function restoreRooms() {
   for (const r of data.rooms) {
     if (!r?.code || !Array.isArray(r.players) || r.players.length === 0 || rooms.has(r.code)) continue;
     const room = {
-      code: r.code, phase: r.phase, round: r.round, hostId: r.hostId, rollerId: r.rollerId ?? null,
+      code: r.code, title: cleanTitle(r.title), phase: r.phase, round: r.round, hostId: r.hostId, rollerId: r.rollerId ?? null,
       rules: cleanRules(r.rules), dice: r.dice, rollId: r.rollId, history: r.history ?? [], sayN: r.sayN ?? 0,
       players: new Map(), watchers: new Map(), voice: new Set(), timer: null, betTimer: null, deadline: null,
     };
@@ -311,7 +356,7 @@ function restoreRooms() {
     rooms.set(room.code, room);
     // pick the round up where it stopped
     if (room.phase === 'rolling') settleRoom(room);
-    else if (room.phase === 'result') room.timer = setTimeout(() => startNextRound(room), RESULT_MS);
+    else if (room.phase === 'result') room.timer = setTimeout(() => afterResult(room), RESULT_MS);
     else if (r.closesIn != null) armBetTimer(room, r.closesIn);
     restored += 1;
   }
@@ -327,6 +372,7 @@ const handlers = {
     leave(ws);
     const room = {
       code: newCode(),
+      title: cleanTitle(msg.title),
       phase: 'betting',
       round: 1,
       hostId: null,
@@ -343,7 +389,8 @@ const handlers = {
       deadline: null,
     };
     rooms.set(room.code, room);
-    bind(ws, room, addPlayer(room, ws, name));
+    bind(ws, room, addPlayer(room, ws, name, msg.avatar));
+    bump('rooms');
   },
 
   join(ws, msg) {
@@ -355,11 +402,14 @@ const handlers = {
       if (room.watchers.size >= MAX_WATCHERS) return fail(ws, 'watchers-full', 'This room has too many spectators.');
       leave(ws);
       bind(ws, room, addWatcher(room, ws, name), true);
+      bump('watchers');
       return;
     }
     if (room.players.size >= MAX_PLAYERS) return fail(ws, 'room-full', `This room is full (${MAX_PLAYERS} players).`);
+    if (room.rules.rounds && room.history.length > 0) return fail(ws, 'tournament-started', 'This tournament has already started. You can watch it instead.');
     leave(ws);
-    bind(ws, room, addPlayer(room, ws, name));
+    bind(ws, room, addPlayer(room, ws, name, msg.avatar));
+    bump('joins');
   },
 
   resume(ws, msg) {
@@ -416,6 +466,7 @@ const handlers = {
   },
 
   rebuy(ws, msg, { room, player }) {
+    if (room.rules.rounds) return fail(ws, 'no-rebuy', 'Chips cannot be refilled during a tournament.');
     if (room.phase !== 'betting' || sumBets(player.bets) > 0 || player.balance >= CHIPS[0]) return;
     player.balance = START_BANKROLL;
     broadcast(room);
@@ -440,8 +491,26 @@ const handlers = {
       if (room.phase !== 'betting') return fail(ws, 'betting-closed', 'Rules can only change while betting is open.');
       if ([...room.players.values()].some((p) => sumBets(p.bets) > 0)) return fail(ws, 'bets-placed', 'Rules cannot change once bets are placed.');
     }
+    if ('rounds' in patch && cleanRules(patch).rounds !== room.rules.rounds && room.history.length > 0) {
+      return fail(ws, 'tournament-locked', 'The tournament length can only be set before the first round.');
+    }
+    const before = room.rules.rounds;
     room.rules = cleanRules({ ...room.rules, ...patch });
+    if (room.rules.rounds !== before) {                                  // everyone starts a tournament with the same chips
+      for (const p of room.players.values()) { p.balance = START_BANKROLL; p.total = 0; p.wins = 0; p.bets = {}; p.log = []; }
+    }
     if (room.rules.voice === 'off') room.voice.clear();
+    broadcast(room);
+  },
+
+  // The host starts a fresh tournament (or a fresh session) with everyone back on equal chips.
+  again(ws, msg, { room, player }) {
+    if (room.hostId !== player.id || room.phase !== 'final') return;
+    room.round = 1;
+    room.history = [];
+    room.phase = 'betting';
+    room.rollerId = room.hostId;
+    for (const p of room.players.values()) { p.balance = START_BANKROLL; p.total = 0; p.wins = 0; p.bets = {}; p.lastBets = {}; p.log = []; p.result = null; }
     broadcast(room);
   },
 
@@ -450,6 +519,7 @@ const handlers = {
   voice(ws, msg, { room, player }) {
     if (room.rules.voice === 'off') return fail(ws, 'voice-off', 'Voice chat is turned off in this room.');
     if (msg.on === true) {
+      if (!room.voice.has(player.id)) bump('voice');
       room.voice.add(player.id);
       const peers = [...room.voice].filter((id) => id !== player.id);
       send(ws, { t: 'voicepeers', peers });             // the newcomer calls everyone already there
@@ -475,7 +545,7 @@ const handlers = {
 
   next(ws, msg, { room, player }) {
     if (!canRoll(room, player) || room.phase !== 'result') return;
-    startNextRound(room);
+    afterResult(room);
   },
 };
 
@@ -505,6 +575,19 @@ const MIME = {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/healthz') { res.writeHead(200).end('ok'); return; }
+  if (url.pathname === '/stats') {
+    const ok = ADMIN_KEY && url.searchParams.get('key') === ADMIN_KEY;
+    if (!ok) { res.writeHead(404).end('Not found'); return; }
+    const days = Object.keys(stats.days).sort();
+    const totals = {};
+    for (const d of days) for (const [k, v] of Object.entries(stats.days[d])) totals[k] = (totals[k] ?? 0) + v;
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({
+      live: { rooms: rooms.size, players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0) },
+      totals, days: Object.fromEntries(days.slice(-30).map((d) => [d, stats.days[d]])),
+    }, null, 2));
+    return;
+  }
   try {
     let file = path.join(DIST, decodeURIComponent(url.pathname));
     if (!file.startsWith(DIST)) throw new Error('outside dist');
@@ -513,6 +596,7 @@ const server = createServer(async (req, res) => {
       if (path.extname(file)) throw new Error('missing');
       file = path.join(DIST, 'index.html'); // single-page app fallback
     }
+    if (path.basename(file) === 'index.html') bump('visits');      // a page load of the app (anonymous, no cookies)
     const body = await readFile(file);
     const immutable = file.startsWith(path.join(DIST, 'assets'));
     res.writeHead(200, {

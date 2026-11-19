@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BookOpen, ChevronLeft, Dices, Download, Languages, Share, Users, Volume2, VolumeX } from 'lucide-react';
+import { BookOpen, ChevronLeft, Dices, Download, Heart, Languages, Share, Users, Volume2, VolumeX } from 'lucide-react';
 import FaceIcon from './FaceIcon.jsx';
 import Solo from './Solo.jsx';
 import Room from './Room.jsx';
@@ -9,6 +9,10 @@ import { FACES } from './faces.js';
 import { LangProvider, useT } from './i18n.jsx';
 import { setMuted } from './sound.js';
 import { useInstall, useWakeLock } from './pwa.js';
+import { useTheme } from './theme.js';
+import ThemeMenu from './ThemeMenu.jsx';
+import SupportDialog from './SupportDialog.jsx';
+import { AbroadCard, DailyBonus, MyStats, SupportNudge } from './HomeExtras.jsx';
 import './styles.css';
 
 /**
@@ -20,7 +24,7 @@ const params = new URLSearchParams(location.search);
 const inviteCode = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
 const hasSession = (() => { try { return !!sessionStorage.getItem('langur-burja:session'); } catch { return false; } })();
 
-function Home({ onPick }) {
+function Home({ onPick, onSupport }) {
   const { t } = useT();
   const { canInstall, install, ios } = useInstall();
   return (
@@ -44,6 +48,10 @@ function Home({ onPick }) {
           <p>{t('home.room.desc')}</p>
         </button>
       </div>
+      <AbroadCard onPick={onPick} />
+      <DailyBonus />
+      <MyStats />
+      <SupportNudge onSupport={onSupport} />
       {canInstall && (
         <button className="install" onClick={install}><Download size={16} /> {t('pwa.install')}</button>
       )}
@@ -57,6 +65,8 @@ function App() {
   const [mode, setMode] = useState(inviteCode || hasSession ? 'room' : 'home');
   const [sound, setSound] = useState(true);
   const [rules, setRules] = useState(false);
+  const [support, setSupport] = useState(false);
+  const [theme, setTheme] = useTheme();
 
   useEffect(() => { setMuted(!sound); }, [sound]);
   useWakeLock(mode !== 'home');
@@ -80,6 +90,7 @@ function App() {
           <button className="ghost-btn lang-btn" onClick={toggle} aria-label={t('nav.langLabel')} title={t('nav.langLabel')}>
             <Languages size={16} /> <span>{t('nav.lang')}</span>
           </button>
+          <ThemeMenu theme={theme} setTheme={setTheme} />
           <button className="icon-btn" onClick={() => setSound((s) => !s)} aria-label={sound ? t('nav.mute') : t('nav.unmute')}>
             {sound ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
@@ -87,12 +98,16 @@ function App() {
         </div>
       </header>
 
-      {mode === 'home' && <Home onPick={setMode} />}
+      {mode === 'home' && <Home onPick={setMode} onSupport={() => setSupport(true)} />}
       {mode === 'solo' && <Solo />}
       {mode === 'room' && <Room initialCode={inviteCode} />}
 
-      <footer className="foot">{t('foot')}</footer>
+      <footer className="foot">
+        {t('foot')}
+        <div><button className="support-link" onClick={() => setSupport(true)}><Heart size={13} /> {t('support.btn')}</button></div>
+      </footer>
       {rules && <RulesDialog onClose={() => setRules(false)} />}
+      {support && <SupportDialog onClose={() => setSupport(false)} />}
     </div>
   );
 }

@@ -14,11 +14,32 @@ test('there are six figures and the five chip values', () => {
   assert.deepEqual(CHIPS, [10, 50, 100, 500, 1000]);
 });
 
-test('settle: a backed figure pays 1:1 per matching die (stake back + stake × matches)', () => {
+test('settle: a figure wins when 2+ dice show it and pays 1:1 per die (stake back + stake × matches)', () => {
   const r = settle({ burja: 100 }, six('burja', 'burja'));
   assert.equal(r.counts.burja, 2);
   assert.equal(r.payout, 300);         // 100 returned + 2 × 100 won
   assert.equal(r.net, 200);
+});
+
+test('settle: exactly one die is NOT a win by default (it would make the game pay the player ~66% per bet)', () => {
+  const r = settle({ paan: 100 }, six('paan'));
+  assert.equal(r.counts.paan, 1);
+  assert.equal(r.payout, 0);
+  assert.equal(r.net, -100);
+  // the older family variant, where one die already wins, is still available
+  assert.equal(settle({ paan: 100 }, six('paan'), { ...DEFAULT_RULES, payout: 'perdie' }).net, 100);
+});
+
+test('the default rule gives the house an edge (about 14% of each stake) instead of the player', () => {
+  // exact expectation over every one of the 6^6 rolls
+  let total = 0; let rolls = 0;
+  const walk = (d) => {
+    if (d.length === 6) { total += settle({ paan: 100 }, d).net; rolls += 1; return; }
+    for (const k of FACE_KEYS) walk([...d, k]);
+  };
+  walk([]);
+  const edge = -total / rolls / 100;
+  assert.ok(edge > 0.12 && edge < 0.16, `house edge ${edge}`);
 });
 
 test('settle: a figure that does not appear loses its stake', () => {
@@ -38,6 +59,7 @@ test("settle: 'once' pays a figure a single time however many dice show it", () 
   const rules = { ...DEFAULT_RULES, payout: 'once' };
   assert.equal(settle({ burja: 100 }, six('burja', 'burja', 'burja'), rules).net, 100);
   assert.equal(settle({ burja: 100 }, six('burja', 'burja', 'burja')).net, 300);
+  assert.equal(settle({ burja: 100 }, six('burja'), rules).net, 100);       // once: a single die wins too
 });
 
 test('settle: ignores unknown figures and non-positive stakes', () => {
@@ -46,11 +68,11 @@ test('settle: ignores unknown figures and non-positive stakes', () => {
   assert.equal(r.staked, 10);
 });
 
-test('settle: with every figure backed equally the player can never gain more than they stake per die', () => {
+test('settle: backing every figure when each shows once loses everything under the default rule', () => {
   const stakes = Object.fromEntries(FACE_KEYS.map((k) => [k, 10]));
   const r = settle(stakes, six('langur', 'burja', 'paan', 'surat', 'eent', 'chidiya'));
   assert.equal(r.staked, 60);
-  assert.equal(r.payout, 120);         // each figure came once: 6 × (10 + 10)
+  assert.equal(r.payout, 0);
 });
 
 test('settle: money is conserved (net = payout − staked) over many random rolls', () => {
@@ -68,7 +90,8 @@ test('settle: money is conserved (net = payout − staked) over many random roll
 test('cleanRules: keeps valid values and falls back to defaults for anything else', () => {
   assert.deepEqual(cleanRules(undefined), DEFAULT_RULES);
   assert.deepEqual(cleanRules({ payout: 'bogus', limit: 123, timer: 7, rotate: 'yes', voice: 'shout' }), DEFAULT_RULES);
-  assert.deepEqual(cleanRules({ payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open' }), { payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open' });
+  assert.deepEqual(cleanRules({ payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open', rounds: 10 }), { payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open', rounds: 10 });
+  assert.equal(cleanRules({ rounds: 7 }).rounds, 0);
   for (const l of LIMITS) assert.equal(cleanRules({ limit: l }).limit, l);
   for (const t of TIMERS) assert.equal(cleanRules({ timer: t }).timer, t);
 });

@@ -3,27 +3,32 @@ import { Copy, Check, LogOut, Users, Wifi, WifiOff, Eye, ChevronDown } from 'luc
 import Table from './Table.jsx';
 import { ChatPanel, SayBubbles } from './Chat.jsx';
 import VoicePanel from './VoicePanel.jsx';
+import { InviteShare, ShareResultButton } from './ShareBar.jsx';
 import { useVoice } from './voice.js';
 import { RecentRolls, FaceFrequency, Standings } from './Panels.jsx';
 import { CHIPS, START_BANKROLL, sumBets } from './faces.js';
-import { settle, PAYOUTS, LIMITS, TIMERS, VOICES, DEFAULT_RULES } from '../shared/game.js';
+import { settle, AVATARS, PAYOUTS, LIMITS, TIMERS, ROUNDS, VOICES, DEFAULT_RULES } from '../shared/game.js';
 import { useRoom } from './useRoom.js';
 import { useT } from './i18n.jsx';
 
 const NAME_KEY = 'langur-burja:name';
+const AVATAR_KEY = 'langur-burja:avatar';
+const readAvatar = () => { try { const a = localStorage.getItem(AVATAR_KEY); return AVATARS.includes(a) ? a : AVATARS[0]; } catch { return AVATARS[0]; } };
 const readName = () => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } };
 
 function Lobby({ room, initialCode }) {
   const { t, te } = useT();
   const [name, setName] = useState(readName);
   const [code, setCode] = useState(initialCode ?? '');
+  const [avatar, setAvatar] = useState(readAvatar);
+  const [title, setTitle] = useState('');
   const busy = room.status === 'connecting';
   const nameOk = name.trim().length > 0;
 
-  const remember = () => { try { localStorage.setItem(NAME_KEY, name.trim()); } catch { /* ignore */ } };
-  const create = (e) => { e.preventDefault(); if (!nameOk) return; remember(); room.create(name.trim()); };
+  const remember = () => { try { localStorage.setItem(NAME_KEY, name.trim()); localStorage.setItem(AVATAR_KEY, avatar); } catch { /* ignore */ } };
+  const create = (e) => { e.preventDefault(); if (!nameOk) return; remember(); room.create(name.trim(), title.trim(), avatar); };
   const watch = () => { if (!nameOk || code.length < 5) return; remember(); room.watch(code, name.trim()); };
-  const join = (e) => { e.preventDefault(); if (!nameOk || code.length < 5) return; remember(); room.join(code, name.trim()); };
+  const join = (e) => { e.preventDefault(); if (!nameOk || code.length < 5) return; remember(); room.join(code, name.trim(), avatar); };
 
   return (
     <main className="wrap narrow">
@@ -35,12 +40,25 @@ function Lobby({ room, initialCode }) {
           <input value={name} maxLength={16} onChange={(e) => setName(e.target.value)} placeholder={t('lobby.namePh')} autoFocus />
         </label>
 
+        <div className="field">
+          <span>{t('lobby.avatar')}</span>
+          <div className="avatars" role="radiogroup" aria-label={t('lobby.avatar')}>
+            {AVATARS.map((a) => (
+              <button type="button" key={a} role="radio" aria-checked={avatar === a} className={`av-pick ${avatar === a ? 'on' : ''}`} onClick={() => setAvatar(a)}>{a}</button>
+            ))}
+          </div>
+        </div>
+
         {room.error && <div className="alert" role="alert">{te(room.error)}</div>}
 
         <div className="lobby-grid">
           <form className="lobby-box" onSubmit={create}>
             <h3>{t('lobby.createTitle')}</h3>
             <p>{t('lobby.createDesc')}</p>
+            <label className="field">
+              <span>{t('lobby.roomTitle')}</span>
+              <input value={title} maxLength={24} onChange={(e) => setTitle(e.target.value)} placeholder={t('lobby.roomTitlePh')} />
+            </label>
             <button className="primary" disabled={!nameOk || busy}>{busy ? t('lobby.connecting') : t('lobby.createBtn')}</button>
           </form>
           <form className="lobby-box" onSubmit={join}>
@@ -59,7 +77,7 @@ function Lobby({ room, initialCode }) {
   );
 }
 
-function InvitePanel({ code, lan }) {
+function InvitePanel({ code, lan, title }) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -73,6 +91,7 @@ function InvitePanel({ code, lan }) {
   return (
     <div className="invite card">
       <div>
+        {title && <div className="room-title">{title}</div>}
         <span className="muted">{t('invite.code')}</span>
         <div className="room-code" aria-label={`${t('invite.code')} ${code.split('').join(' ')}`}>{code}</div>
       </div>
@@ -83,12 +102,13 @@ function InvitePanel({ code, lan }) {
           <button className="ghost-btn" onClick={copy}>{copied ? <Check size={15} /> : <Copy size={15} />} {copied ? t('invite.copied') : t('invite.copy')}</button>
         </div>
         {local && !lan[0] && <span className="fine">{t('invite.noLan')}</span>}
+        <InviteShare code={code} title={title} link={link} />
       </div>
     </div>
   );
 }
 
-function RulesBar({ rules, isHost, editable, send }) {
+function RulesBar({ rules, isHost, editable, fresh, send }) {
   const { t, rs } = useT();
   const limitLabel = (l) => (l ? rs(l) : t('hr.nolimit'));
   const set = (patch) => send({ t: 'rules', rules: patch });
@@ -100,6 +120,7 @@ function RulesBar({ rules, isHost, editable, send }) {
     rules.rotate ? t('hr.rotate.on') : t('hr.rotate.off'),
     `${t('hr.timer')}: ${rules.timer ? t('hr.seconds', { n: rules.timer }) : t('hr.off')}`,
     `${t('hr.voice')}: ${t(`hr.voice.${rules.voice}`)}`,
+    ...(rules.rounds ? [t('hr.rounds.n', { n: rules.rounds })] : []),
   ].join(' · ');
   return (
     <div className={`card houserules ${open ? 'open' : ''}`}>
@@ -139,6 +160,16 @@ function RulesBar({ rules, isHost, editable, send }) {
           <span className="hr-note">{t('hr.rotate.note')}</span>
         </div>
         <div className="hr-group">
+          <span className="hr-label">{t('hr.rounds')}</span>
+          <div className="seg" role="radiogroup" aria-label={t('hr.rounds')}>
+            {ROUNDS.map((n) => (
+              <button key={n} role="radio" aria-checked={rules.rounds === n} className={rules.rounds === n ? 'on' : ''}
+                disabled={!isHost || !editable || !fresh} onClick={() => set({ rounds: n })}>{n ? t('hr.rounds.n', { n }) : t('hr.rounds.0')}</button>
+            ))}
+          </div>
+          <span className="hr-note">{t('hr.rounds.note')}</span>
+        </div>
+        <div className="hr-group">
           <span className="hr-label">{t('hr.voice')}</span>
           <div className="seg" role="radiogroup" aria-label={t('hr.voice')}>
             {VOICES.map((v) => (
@@ -159,6 +190,35 @@ function RulesBar({ rules, isHost, editable, send }) {
           <span className="hr-note">{t('hr.timer.note')}</span>
         </div>
       </div>}
+    </div>
+  );
+}
+
+/** Shown when a tournament has run its rounds: ranking by chips, share and play again. */
+function TournamentFinal({ state, you, isHost, send }) {
+  const { t, rs } = useT();
+  const ranking = [...state.players].sort((a, b) => b.balance - a.balance).map((p) => ({ name: p.name, avatar: p.avatar, value: p.balance, id: p.id }));
+  const winner = ranking[0];
+  return (
+    <div className="card tour-final" role="status">
+      <h2>{t('tour.title')} <span className="muted">· {t('hr.rounds.n', { n: state.rules.rounds })}</span></h2>
+      <p className="winner">{t('tour.winner', { name: `${winner.avatar ?? ''} ${winner.name}` })}</p>
+      <ol className="standings">
+        {ranking.map((r, i) => (
+          <li key={r.id} className={r.id === you ? 'me' : ''}>
+            <span className={`rank r${i + 1}`}>{i + 1}</span>
+            <span className="sname"><span className="av">{r.avatar}</span> {r.name}</span>
+            <span />
+            <span className="net">{rs(r.value)}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="tour-actions">
+        <ShareResultButton build={() => ({ title: state.title, code: state.code, ranking, dice: [] })} />
+        {isHost
+          ? <button className="primary" onClick={() => send({ t: 'again' })}>{t('tour.again')}</button>
+          : <span className="muted">{t('tour.waitHost')}</span>}
+      </div>
     </div>
   );
 }
@@ -214,8 +274,11 @@ function RoomView({ room }) {
     return () => clearTimeout(timer);
   }, [room.error]);
 
+  const tour = state.rules?.rounds ?? 0;
+  const roundLabel = tour ? t('tour.round', { n: state.round, total: tour }) : undefined;
   let rollLabel; let rollDisabled; let onRoll;
-  if (phase === 'rolling') { rollLabel = t('roll.rolling'); rollDisabled = true; onRoll = () => {}; }
+  if (phase === 'final') { rollLabel = t('tour.title'); rollDisabled = true; onRoll = () => {}; }
+  else if (phase === 'rolling') { rollLabel = t('roll.rolling'); rollDisabled = true; onRoll = () => {}; }
   else if (phase === 'result') {
     rollLabel = isRoller ? t('roll.next') : t('roll.wait', { name: roller?.name ?? '' });
     rollDisabled = !isRoller || !connected;
@@ -235,17 +298,19 @@ function RoomView({ room }) {
           : (totalBet > 0 ? t('room.hintReady') : t('solo.hintIdle'));
 
   const history = state.history.map((h) => ({ id: `${h.round}`, dice: h.dice, round: h.round, top: h.results?.[0] }));
-  const broke = connected && phase === 'betting' && totalBet === 0 && me.balance < CHIPS[0];
+  const broke = connected && phase === 'betting' && totalBet === 0 && me.balance < CHIPS[0] && !tour;
 
   return (
     <main className="wrap">
       <SayBubbles said={room.said} you={you} />
-      <InvitePanel code={state.code} lan={room.lan} />
-      <RulesBar rules={state.rules ?? DEFAULT_RULES} isHost={isHost} editable={connected && phase === 'betting' && !anyStake} send={send} />
+      <InvitePanel code={state.code} lan={room.lan} title={state.title} />
+      <RulesBar rules={state.rules ?? DEFAULT_RULES} isHost={isHost} editable={connected && phase === 'betting' && !anyStake} fresh={state.history.length === 0} send={send} />
+
+      {phase === 'final' && <TournamentFinal state={state} you={you} isHost={isHost} send={send} />}
 
       <Table
         dice={state.dice} rollId={state.rollId} rolling={rolling} result={result} hint={hint}
-        bets={me.bets} others={others} balance={me.balance} round={state.round} countdown={left}
+        bets={me.bets} others={others} balance={me.balance} round={state.round} countdown={left} roundLabel={roundLabel} shareCtx={{ title: state.title, code: state.code }}
         chip={chip} setChip={setChip} locked={phase !== 'betting' || !connected}
         onPlace={(face) => send({ t: 'bet', face, amount: chip })}
         onUndo={() => send({ t: 'undo' })} onClear={() => send({ t: 'clear' })} onRebet={() => send({ t: 'rebet' })}
@@ -279,7 +344,7 @@ function RoomView({ room }) {
                 <li key={p.id} className={p.id === you ? 'me' : ''}>
                   <span className={`dot ${p.connected ? 'on' : ''}`} />
                   <span className="pname">
-                    {p.name}
+                    <span className="av">{p.avatar}</span> {p.name}
                     {p.id === state.hostId && <em className="tag host">{t('room.host')}</em>}
                     {p.id === rollerId && <em className="tag roller">{t('room.roller')}</em>}
                     {p.id === you && <em className="tag">{t('room.you')}</em>}
@@ -353,9 +418,12 @@ function WatchView({ room }) {
         <button className="ghost-btn" onClick={room.leave}><LogOut size={15} /> {t('room.leave')}</button>
       </div>
 
+      {state.phase === 'final' && <TournamentFinal state={state} you={you} isHost={false} send={send} />}
+
       <Table
         watching dice={state.dice} rollId={state.rollId} rolling={rolling} result={null} hint={hint}
         bets={{}} others={totals} balance={0} round={state.round} countdown={left}
+        roundLabel={state.rules?.rounds ? t('tour.round', { n: state.round, total: state.rules.rounds }) : undefined} shareCtx={{ title: state.title, code: state.code }}
         chip={0} setChip={() => {}} locked
         onPlace={() => {}} onUndo={() => {}} onClear={() => {}} onRebet={() => {}} onRoll={() => {}}
         rollLabel="" rollDisabled canUndo={false} canClear={false} canRebet={false}
@@ -372,7 +440,7 @@ function WatchView({ room }) {
               <li key={p.id}>
                 <span className={`dot ${p.connected ? 'on' : ''}`} />
                 <span className="pname">
-                  {p.name}
+                  <span className="av">{p.avatar}</span> {p.name}
                   {p.id === state.hostId && <em className="tag host">{t('room.host')}</em>}
                   {p.id === (state.rollerId ?? state.hostId) && <em className="tag roller">{t('room.roller')}</em>}
                 </span>

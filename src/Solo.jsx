@@ -6,6 +6,7 @@ import { CHIPS, FACE_KEYS, ROLL_MS, START_BANKROLL, sumBets } from './faces.js';
 import { settle, DICE_COUNT } from '../shared/game.js';
 import { useT } from './i18n.jsx';
 import { sfx } from './sound.js';
+import { recordRound } from './stats.js';
 
 const STORAGE_KEY = 'langur-burja:solo:v2';
 
@@ -93,6 +94,7 @@ export default function Solo() {
     setRolling(true);
     timer.current = setTimeout(() => {
       const s = settle(stakes, final);
+      if (s.lines.length) recordRound(s.net);          // personal record + streaks (this device only)
       setBalance((b) => b + s.payout);
       setResult({ net: s.net, lines: s.lines, counts: s.counts });
       setLastBets(stakes);
@@ -113,7 +115,7 @@ export default function Solo() {
     <main className="wrap">
       <Table
         dice={dice} rollId={rollId} rolling={rolling} result={result} hint={hint}
-        bets={bets} balance={balance} round={round}
+        bets={bets} balance={balance} round={round} shareCtx={{}}
         chip={chip} setChip={setChip} locked={rolling}
         onPlace={place} onUndo={undo} onClear={clear} onRebet={rebet} onRoll={roll}
         rollLabel={rolling ? t('roll.rolling') : t('roll.go')}
