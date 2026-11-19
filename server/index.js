@@ -85,6 +85,11 @@ function publicState(room) {
     hostId: room.hostId,
     rollerId: rollerOf(room),
     watchers: room.watchers.size,
+    voice: [...room.voice].map((id) => {
+      const p = room.players.get(id);
+      const w = p ? null : room.watchers.get(id);
+      return (p || w) ? { id, name: (p ?? w).name, watcher: !p } : null;
+    }).filter(Boolean),
     rules: room.rules,
     closesIn: room.deadline ? Math.max(0, room.deadline - Date.now()) : null,   // ms until betting auto-closes
     dice: room.dice,
@@ -161,6 +166,7 @@ function bind(ws, room, player, watcher = false) {
 
 function removePlayer(room, player) {
   clearTimeout(player.removeTimer);
+  room.voice.delete(player.id);
   room.players.delete(player.id);
   if (room.players.size === 0) {
     clearTimeout(room.timer);
@@ -294,7 +300,7 @@ function restoreRooms() {
     const room = {
       code: r.code, phase: r.phase, round: r.round, hostId: r.hostId, rollerId: r.rollerId ?? null,
       rules: cleanRules(r.rules), dice: r.dice, rollId: r.rollId, history: r.history ?? [], sayN: r.sayN ?? 0,
-      players: new Map(), watchers: new Map(), timer: null, betTimer: null, deadline: null,
+      players: new Map(), watchers: new Map(), voice: new Set(), timer: null, betTimer: null, deadline: null,
     };
     for (const p of r.players) {
       const player = { ...p, ws: null, connected: false, removeTimer: null };
@@ -331,6 +337,7 @@ const handlers = {
       history: [],
       players: new Map(),
       watchers: new Map(),
+      voice: new Set(),            // ids (players and spectators) currently in the voice chat
       timer: null,
       betTimer: null,
       deadline: null,
@@ -427,10 +434,36 @@ const handlers = {
 
   rules(ws, msg, { room, player }) {
     if (room.hostId !== player.id) return fail(ws, 'host-only', 'Only the host can change the rules.');
-    if (room.phase !== 'betting') return fail(ws, 'betting-closed', 'Rules can only change while betting is open.');
-    if ([...room.players.values()].some((p) => sumBets(p.bets) > 0)) return fail(ws, 'bets-placed', 'Rules cannot change once bets are placed.');
-    room.rules = cleanRules({ ...room.rules, ...msg.rules });
+    const patch = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
+    const voiceOnly = Object.keys(patch).every((k) => k === 'voice');      // the voice mode may change at any time
+    if (!voiceOnly) {
+      if (room.phase !== 'betting') return fail(ws, 'betting-closed', 'Rules can only change while betting is open.');
+      if ([...room.players.values()].some((p) => sumBets(p.bets) > 0)) return fail(ws, 'bets-placed', 'Rules cannot change once bets are placed.');
+    }
+    room.rules = cleanRules({ ...room.rules, ...patch });
+    if (room.rules.voice === 'off') room.voice.clear();
     broadcast(room);
+  },
+
+  // ── voice chat ──
+  // Audio flows directly between browsers (WebRTC). The server only keeps the roster and relays the setup messages.
+  voice(ws, msg, { room, player }) {
+    if (room.rules.voice === 'off') return fail(ws, 'voice-off', 'Voice chat is turned off in this room.');
+    if (msg.on === true) {
+      room.voice.add(player.id);
+      const peers = [...room.voice].filter((id) => id !== player.id);
+      send(ws, { t: 'voicepeers', peers });             // the newcomer calls everyone already there
+    } else {
+      room.voice.delete(player.id);
+    }
+    broadcast(room);
+  },
+
+  rtc(ws, msg, { room, player }) {
+    if (!room.voice.has(player.id) || !room.voice.has(msg.to)) return;
+    const target = room.players.get(msg.to) ?? room.watchers.get(msg.to);
+    if (!target?.ws || JSON.stringify(msg.data ?? null).length > 12_000) return;
+    send(target.ws, { t: 'rtc', from: player.id, data: msg.data });
   },
 
   roll(ws, msg, { room, player }) {
@@ -448,6 +481,7 @@ const handlers = {
 
 function removeWatcher(room, watcher) {
   clearTimeout(watcher.removeTimer);
+  room.voice.delete(watcher.id);
   room.watchers.delete(watcher.id);
   broadcast(room);
 }
@@ -492,7 +526,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 2048 });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16_384 });
 
 const perIp = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress || '?';
@@ -512,15 +546,15 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data) => {
     const now = Date.now();
     if (now - windowStart > 1000) { windowStart = now; count = 0; }
-    if ((count += 1) > 30) { ws.close(1008, 'rate limit'); return; }
-
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
+    // call-setup messages arrive in bursts (one set per peer), so they weigh much less than game messages
+    if ((count += msg?.t === 'rtc' ? 0.15 : 1) > 30) { ws.close(1008, 'rate limit'); return; }
     if (!msg || typeof msg.t !== 'string' || !Object.hasOwn(handlers, msg.t)) return;
 
     const needsRoom = !['create', 'join', 'resume', 'leave'].includes(msg.t);
     if (needsRoom && !ws.ctx) return fail(ws, 'not-in-room', 'You are not in a room.');
-    if (ws.ctx?.watcher && !['say', 'leave'].includes(msg.t)) return fail(ws, 'watch-only', 'Spectators can only watch and send reactions.');
+    if (ws.ctx?.watcher && !['say', 'leave', 'voice', 'rtc'].includes(msg.t)) return fail(ws, 'watch-only', 'Spectators can only watch and send reactions.');
     handlers[msg.t](ws, msg, ws.ctx);
   });
 
@@ -530,6 +564,7 @@ wss.on('connection', (ws, req) => {
     const { room, player } = ctx;
     player.connected = false;
     player.ws = null;
+    if (room.voice.delete(player.id)) broadcast(room);     // a dropped connection also drops the voice call
     if (ctx.watcher) {
       player.removeTimer = setTimeout(() => removeWatcher(room, player), GRACE_MS);
       return;

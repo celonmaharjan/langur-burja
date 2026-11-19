@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Copy, Check, LogOut, Users, Wifi, WifiOff, Eye, ChevronDown } from 'lucide-react';
 import Table from './Table.jsx';
 import { ChatPanel, SayBubbles } from './Chat.jsx';
+import VoicePanel from './VoicePanel.jsx';
+import { useVoice } from './voice.js';
 import { RecentRolls, FaceFrequency, Standings } from './Panels.jsx';
 import { CHIPS, START_BANKROLL, sumBets } from './faces.js';
-import { settle, PAYOUTS, LIMITS, TIMERS, DEFAULT_RULES } from '../shared/game.js';
+import { settle, PAYOUTS, LIMITS, TIMERS, VOICES, DEFAULT_RULES } from '../shared/game.js';
 import { useRoom } from './useRoom.js';
 import { useT } from './i18n.jsx';
 
@@ -97,6 +99,7 @@ function RulesBar({ rules, isHost, editable, send }) {
     limitLabel(rules.limit),
     rules.rotate ? t('hr.rotate.on') : t('hr.rotate.off'),
     `${t('hr.timer')}: ${rules.timer ? t('hr.seconds', { n: rules.timer }) : t('hr.off')}`,
+    `${t('hr.voice')}: ${t(`hr.voice.${rules.voice}`)}`,
   ].join(' · ');
   return (
     <div className={`card houserules ${open ? 'open' : ''}`}>
@@ -136,6 +139,16 @@ function RulesBar({ rules, isHost, editable, send }) {
           <span className="hr-note">{t('hr.rotate.note')}</span>
         </div>
         <div className="hr-group">
+          <span className="hr-label">{t('hr.voice')}</span>
+          <div className="seg" role="radiogroup" aria-label={t('hr.voice')}>
+            {VOICES.map((v) => (
+              <button key={v} role="radio" aria-checked={rules.voice === v} className={rules.voice === v ? 'on' : ''}
+                disabled={!isHost} onClick={() => set({ voice: v })}>{t(`hr.voice.${v}`)}</button>
+            ))}
+          </div>
+          <span className="hr-note">{t('hr.voice.note')}</span>
+        </div>
+        <div className="hr-group">
           <span className="hr-label">{t('hr.timer')}</span>
           <div className="seg" role="radiogroup" aria-label={t('hr.timer')}>
             {TIMERS.map((n) => (
@@ -164,6 +177,7 @@ function RoomView({ room }) {
   const totalBet = sumBets(me?.bets);
   const anyStake = state.players.some((p) => sumBets(p.bets) > 0);
   const connected = room.status === 'open';
+  const voice = useVoice({ you, state, send, subscribe: room.subscribe, watcher: false, mode: state.rules?.voice ?? 'ptt' });
 
   // Countdown to automatic roll. The server sends "ms left" with each state; we count down locally from there.
   const [left, setLeft] = useState(null);
@@ -288,6 +302,7 @@ function RoomView({ room }) {
         </div>
         <div className="stack">
           <Standings players={state.players} you={you} />
+          <VoicePanel voice={voice} mode={state.rules?.voice ?? 'ptt'} you={you} watcher={false} />
           <ChatPanel send={send} said={room.said} you={you} />
           <RecentRolls items={history} />
           <FaceFrequency items={history} />
@@ -303,6 +318,7 @@ function WatchView({ room }) {
   const phase = state.phase;
   const rolling = phase === 'rolling';
   const connected = room.status === 'open';
+  const voice = useVoice({ you, state, send, subscribe: room.subscribe, watcher: true, mode: state.rules?.voice ?? 'ptt' });
   const roller = state.players.find((p) => p.id === (state.rollerId ?? state.hostId));
 
   const totals = useMemo(() => {
@@ -367,6 +383,7 @@ function WatchView({ room }) {
         </div>
         <div className="stack">
           <Standings players={state.players} you={null} />
+          <VoicePanel voice={voice} mode={state.rules?.voice ?? 'ptt'} you={you} watcher />
           <ChatPanel send={send} said={room.said} you={you} />
           <RecentRolls items={history} />
           <FaceFrequency items={history} />

@@ -25,6 +25,7 @@ export function useRoom() {
   const retry = useRef(0);
   const timer = useRef(null);
   const joined = useRef(false); // true once the server has seated us
+  const listeners = useRef(new Set()); // raw-message subscribers (voice call setup)
 
   const reset = useCallback(() => {
     want.current = false;
@@ -62,6 +63,8 @@ export function useRoom() {
         setLan(msg.lan ?? []);
         setStatus('open');
         setError(null);
+      } else if (msg.t === 'rtc' || msg.t === 'voicepeers') {
+        listeners.current.forEach((fn) => fn(msg));
       } else if (msg.t === 'say') {
         setSaid((list) => [...list.slice(-19), { n: msg.n, from: msg.from, name: msg.name, id: msg.id, at: Date.now() }]);
       } else if (msg.t === 'state') {
@@ -129,7 +132,13 @@ export function useRoom() {
     reset();
   }, [send, reset]);
 
+  const subscribe = useCallback((fn) => {
+    listeners.current.add(fn);
+    return () => { listeners.current.delete(fn); };
+  }, []);
+
   return {
+    subscribe,
     status, state, you, role, lan, error, said, send, leave,
     create: (name) => start({ t: 'create', name }),
     join: (code, name) => start({ t: 'join', code, name }),

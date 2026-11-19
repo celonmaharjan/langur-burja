@@ -39,7 +39,7 @@ const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.
 await new Promise((res) => server.stdout.on('data', (d) => { if (String(d).includes('listening')) res(); }));
 
 const profile = mkdtempSync(path.join(tmpdir(), 'langur-e2e-'));
-const chrome = spawn(findChrome(), [`--remote-debugging-port=${CDP_PORT}`, '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(findChrome(), [`--remote-debugging-port=${CDP_PORT}`, '--no-sandbox', '--disable-gpu', '--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => { chrome.kill(); server.kill('SIGTERM'); rmSync(profile, { recursive: true, force: true }); };
 process.on('exit', cleanup);
 
@@ -168,6 +168,26 @@ try {
     await b.click('.react', 1);
     await a.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
     await c.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
+  });
+
+  await step('voice chat: a player talks and the other player and the spectator hear and see it', async () => {
+    for (const t of [a, b, c]) await t.click('.voice-join');
+    await a.waitFor(`document.querySelectorAll('.voice-list li').length === 3`);
+    assert.equal(await c.js(`!document.querySelector('.mic-btn')`), true, 'spectators get no microphone button');
+    // hold push-to-talk on A (the browser supplies a fake microphone that beeps)
+    await a.js(`document.querySelector('.mic-btn').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
+    await a.waitFor(`!!document.querySelector('.mic-btn.live')`);
+    const heard = `[...document.querySelectorAll('.voice-list li.speaking')].some((li) => li.innerText.includes('Asha'))`;
+    try { await b.waitFor(heard, 20000); } catch (e) {            // audio crossed the peer-to-peer connection
+      console.log('A peers:', JSON.stringify(await a.js(`window.__langurVoice()`)), '\\nB peers:', JSON.stringify(await b.js(`window.__langurVoice()`)));
+      throw e;
+    }
+    await c.waitFor(heard, 20000);
+    await a.js(`document.querySelector('.mic-btn').dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))`);
+    await a.waitFor(`!document.querySelector('.mic-btn.live')`);
+    await b.click('.voice-list li:not(.speaking) .icon-btn');          // local mute button exists for others
+    await b.click('.voice-controls .ghost-btn');                        // leave voice
+    await a.waitFor(`document.querySelectorAll('.voice-list li').length === 2`);
   });
 
   await step('no JavaScript errors in any tab', async () => { assert.deepEqual(problems, []); });

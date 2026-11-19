@@ -67,8 +67,8 @@ test('settle: money is conserved (net = payout − staked) over many random roll
 
 test('cleanRules: keeps valid values and falls back to defaults for anything else', () => {
   assert.deepEqual(cleanRules(undefined), DEFAULT_RULES);
-  assert.deepEqual(cleanRules({ payout: 'bogus', limit: 123, timer: 7, rotate: 'yes' }), DEFAULT_RULES);
-  assert.deepEqual(cleanRules({ payout: 'once', limit: 500, timer: 30, rotate: false }), { payout: 'once', limit: 500, timer: 30, rotate: false });
+  assert.deepEqual(cleanRules({ payout: 'bogus', limit: 123, timer: 7, rotate: 'yes', voice: 'shout' }), DEFAULT_RULES);
+  assert.deepEqual(cleanRules({ payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open' }), { payout: 'once', limit: 500, timer: 30, rotate: false, voice: 'open' });
   for (const l of LIMITS) assert.equal(cleanRules({ limit: l }).limit, l);
   for (const t of TIMERS) assert.equal(cleanRules({ timer: t }).timer, t);
 });

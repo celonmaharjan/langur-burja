@@ -19,7 +19,8 @@ export const RESULT_MS = 9000;   // how long a room shows the result before the 
 export const PAYOUTS = ['perdie', 'once'];
 export const LIMITS = [0, 500, 1000, 5000];   // max total stake per figure; 0 = no limit
 export const TIMERS = [0, 20, 30, 60];         // seconds betting stays open after the first bet; 0 = no timer
-export const DEFAULT_RULES = { payout: 'perdie', limit: 0, timer: 0, rotate: true };   // rotate: a different player rolls each round
+export const VOICES = ['off', 'ptt', 'open'];   // voice chat: off, push-to-talk, or open mic (players choose when to unmute)
+export const DEFAULT_RULES = { payout: 'perdie', limit: 0, timer: 0, rotate: true, voice: 'ptt' };   // rotate: a different player rolls each round
 
 export function cleanRules(r) {
   return {
@@ -27,6 +28,7 @@ export function cleanRules(r) {
     limit: LIMITS.includes(Number(r?.limit)) ? Number(r.limit) : DEFAULT_RULES.limit,
     timer: TIMERS.includes(Number(r?.timer)) ? Number(r.timer) : DEFAULT_RULES.timer,
     rotate: typeof r?.rotate === 'boolean' ? r.rotate : DEFAULT_RULES.rotate,
+    voice: VOICES.includes(r?.voice) ? r.voice : DEFAULT_RULES.voice,
   };
 }
 

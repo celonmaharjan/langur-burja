@@ -14,6 +14,7 @@ function client(name) {
     if (m.t === 'welcome') { c.you = m.you; c.token = m.token; c.code = m.code; }
     if (m.t === 'state') c.state = m.state;
     if (m.t === 'say') (c.said ??= []).push(m);
+    if (m.t === 'rtc' || m.t === 'voicepeers') (c.rtc ??= []).push(m);
     if (m.t === 'error') c.errors.push(m.msg);
     c.waiters = c.waiters.filter((w) => !w(c));
   });
@@ -239,6 +240,62 @@ console.log('✓ bad token rejected');
   assert.equal(host.state.players.length, seated);
   w2.ws.close();
   console.log('✓ spectators: read-only, can react, resume, leave');
+}
+
+// ── voice chat (roster + call-setup relay; the audio itself is peer-to-peer) ──
+{
+  assert.equal(host.state.rules.voice, 'ptt');
+  assert.deepEqual(host.state.voice, []);
+  host.send({ t: 'voice', on: true });
+  await host.until((c) => c.state.voice.length === 1);
+  assert.deepEqual(host.rtc?.filter((m) => m.t === 'voicepeers').at(-1)?.peers, [], 'first person has nobody to call');
+
+  back.send({ t: 'voice', on: true });
+  await back.until((c) => c.state.voice.length === 2);
+  assert.deepEqual(back.rtc.filter((m) => m.t === 'voicepeers').at(-1).peers, [host.you], 'newcomer is told who to call');
+
+  // call-setup messages are relayed only between people who are in the call
+  back.send({ t: 'rtc', to: host.you, data: { sdp: { type: 'offer', sdp: 'v=0' } } });
+  await host.until((c) => c.rtc?.some((m) => m.t === 'rtc' && m.from === back.you && m.data.sdp.type === 'offer'));
+  const outsider = client('Outsider');
+  await outsider.open;
+  outsider.send({ t: 'join', code: host.code, name: 'Outsider', watch: true });
+  await outsider.until((c) => c.you && c.state);
+  const before = host.rtc.length;
+  outsider.send({ t: 'rtc', to: host.you, data: { ice: { candidate: 'x' } } });   // spectator not in the call yet
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(host.rtc.length, before, 'not-in-call senders are ignored');
+
+  // a spectator can join the call as a listener
+  outsider.send({ t: 'voice', on: true });
+  await host.until((c) => c.state.voice.some((v) => v.watcher && v.name === 'Outsider'));
+  outsider.send({ t: 'rtc', to: host.you, data: { ice: { candidate: 'y' } } });
+  await host.until((c) => c.rtc.some((m) => m.from === outsider.you));
+
+  // an oversized message is not relayed
+  const sizeBefore = host.rtc.length;
+  back.send({ t: 'rtc', to: host.you, data: { sdp: 'x'.repeat(13000) } });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(host.rtc.length, sizeBefore);
+
+  // dropping the connection removes someone from the call
+  outsider.ws.close();
+  await host.until((c) => !c.state.voice.some((v) => v.name === 'Outsider'));
+
+  // only the host changes the mode; switching voice off empties the call; joining while off is refused
+  const n = back.errors.length;
+  back.send({ t: 'rules', rules: { voice: 'off' } });
+  await back.until((c) => c.errors.length > n);
+  host.send({ t: 'rules', rules: { voice: 'open' } });
+  await host.until((c) => c.state.rules.voice === 'open');
+  host.send({ t: 'rules', rules: { voice: 'off' } });
+  await host.until((c) => c.state.rules.voice === 'off' && c.state.voice.length === 0);
+  const m = host.errors.length;
+  host.send({ t: 'voice', on: true });
+  await host.until((c) => c.errors.length > m);
+  host.send({ t: 'rules', rules: { voice: 'ptt' } });
+  await host.until((c) => c.state.rules.voice === 'ptt');
+  console.log('✓ voice chat: roster, newcomer calls existing, relay limited to the call, spectators listen, host rule');
 }
 
 for (const c of [host, back, ghost, globalThis.guest]) c.ws.close();
