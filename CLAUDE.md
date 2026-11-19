@@ -10,6 +10,8 @@ Nepali six-dice game, play-money only, Nepali/English. Vite + React 19 frontend,
 
 ## Decisions and why
 - Payout default `multi`: a figure wins only with 2+ dice, paying 1:1 per die; one die loses the bet. The old per-die rule gave players about +66% per bet. House edge is now about 14% (verified by an exhaustive 6^6 unit test). `perdie` and `once` remain as house-rule options.
+- Ready button: every connected player except the roller taps Ready (bets lock while ready; "Not ready" unlocks). The roller's Roll is disabled until all are ready; "Roll anyway" sends `{t:'roll', force:true}`; the betting timer still auto-rolls. `ready` resets each round.
+- Chat: quick reactions/phrases (`say`) plus free text (`chat`, plain text only, 140 chars, 700 ms rate limit, spectators allowed). Each reaction has its own synth sound in `src/sound.js`.
 - Rules: payout, limit, timer, rotate roller, voice mode, tournament rounds (5/10/20, only before round 1, equal chips, no rebuy).
 - Voice: free Google STUN only, no TURN, so some strict networks will not connect. Spectators listen only.
 - No accounts and no personal data. Stats are anonymous daily counters.

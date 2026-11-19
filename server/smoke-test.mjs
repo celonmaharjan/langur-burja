@@ -61,10 +61,37 @@ await host.until((c) => me(c).bets.paan === undefined);
 assert.equal(me(host).balance, 5000 - 100);
 console.log('✓ bets deducted, undo refunds');
 
+// Ready button: the roller waits until everyone else taps Ready; bets lock while ready
+friend.errors.length = 0; host.errors.length = 0;
+host.send({ t: 'roll' });
+await host.until((c) => c.errors.some((e) => e.includes('Bikash')));
+assert.equal(host.state.players.find((p) => p.id === friend.you).ready, false);
+friend.send({ t: 'ready', on: true });
+await host.until((c) => c.state.players.find((p) => p.id === friend.you).ready === true);
+friend.send({ t: 'bet', face: 'eent', amount: 10 });
+await friend.until((c) => c.errors.some((e) => e.includes('Not ready')));
+assert.equal(me(friend).bets.eent, undefined, 'a ready player cannot change bets');
+friend.send({ t: 'ready', on: false });
+await host.until((c) => c.state.players.find((p) => p.id === friend.you).ready === false);
+friend.send({ t: 'ready', on: true });
+await host.until((c) => c.state.players.find((p) => p.id === friend.you).ready === true);
+console.log('✓ ready button: roll waits for ready players, bets lock while ready');
+
+// free-text chat: plain text, trimmed, length-capped
+host.said = []; friend.said = [];
+host.send({ t: 'chat', text: '   Namaste <b>hi</b>   ' + 'x'.repeat(300) });
+await friend.until((c) => c.said.length === 1);
+assert.ok(friend.said[0].text.startsWith('Namaste <b>hi</b> x') && friend.said[0].text.length === 140);
+host.send({ t: 'chat', text: '    ' });
+await new Promise((r) => setTimeout(r, 150));
+assert.equal(friend.said.length, 1, 'empty messages are dropped');
+host.said = []; friend.said = [];
+console.log('✓ text chat delivered, trimmed and capped');
+
 host.send({ t: 'roll' });
 await friend.until((c) => c.state.phase === 'rolling');
 friend.send({ t: 'bet', face: 'surat', amount: 10 });          // locked while rolling
-await friend.until((c) => c.errors.length >= 4);
+await friend.until((c) => c.errors.some((e) => e.includes('closed')));
 await Promise.all([host, friend].map((c) => c.until((cc) => cc.state.phase === 'result', 8000)));
 
 const { dice } = host.state;
@@ -147,7 +174,7 @@ console.log('✓ bad token rejected');
   await host.until((c) => c.state.closesIn > 0 && c.state.closesIn <= 20000);
   console.log('✓ timer starts at first bet (' + Math.round(host.state.closesIn / 1000) + 's left)');
   // rules lock while it runs; then an early manual roll stops the timer
-  host.send({ t: 'roll' });
+  host.send({ t: 'roll', force: true });
   await host.until((c) => c.state.phase === 'rolling');
   assert.equal(host.state.closesIn, null);
   await host.until((c) => c.state.phase === 'result', 8000);
@@ -166,11 +193,11 @@ console.log('✓ bad token rejected');
   const r1 = rollerClient();
   const other = all.find((c) => c !== r1);
   const n = other.errors.length;
-  other.send({ t: 'roll' });
+  other.send({ t: 'roll', force: true });
   await other.until((c) => c.errors.length > n);
   r1.send({ t: 'bet', face: 'burja', amount: 10 });
   await r1.until((c) => c.state.players.find((p) => p.id === c.you).bets.burja === 10);
-  r1.send({ t: 'roll' });
+  r1.send({ t: 'roll', force: true });
   await host.until((c) => c.state.phase === 'result', 8000);
   const before = host.state.rollerId;
   r1.send({ t: 'next' });
@@ -220,7 +247,7 @@ console.log('✓ bad token rejected');
   await host.until((c) => c.state.watchers === 1);
   const n = w.errors.length;
   w.send({ t: 'bet', face: 'burja', amount: 10 });
-  w.send({ t: 'roll' });
+  w.send({ t: 'roll', force: true });
   w.send({ t: 'rules', rules: { limit: 500 } });
   await w.until((c) => c.errors.length >= n + 3);
   assert.equal(host.state.rules.limit, 0);
@@ -318,7 +345,7 @@ console.log('✓ bad token rejected');
     const roller = [h, g].find((c) => c.you === h.state.rollerId);
     roller.send({ t: 'bet', face: 'paan', amount: 10 });
     await roller.until((c) => c.state.players.find((p) => p.id === c.you).bets.paan >= 10);
-    roller.send({ t: 'roll' });
+    roller.send({ t: 'roll', force: true });
     await h.until((c) => c.state.phase === 'result', 8000);
     roller.send({ t: 'next' });
   };

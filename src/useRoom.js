@@ -66,7 +66,7 @@ export function useRoom() {
       } else if (msg.t === 'rtc' || msg.t === 'voicepeers') {
         listeners.current.forEach((fn) => fn(msg));
       } else if (msg.t === 'say') {
-        setSaid((list) => [...list.slice(-19), { n: msg.n, from: msg.from, name: msg.name, id: msg.id, at: Date.now() }]);
+        setSaid((list) => [...list.slice(-49), { n: msg.n, from: msg.from, name: msg.name, id: msg.id, text: msg.text, watcher: !!msg.watcher, at: Date.now() }]);
       } else if (msg.t === 'state') {
         setState(msg.state);
       } else if (msg.t === 'error') {

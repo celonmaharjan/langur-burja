@@ -159,6 +159,11 @@ try {
     await b.click('.chip-500'); await b.click('.cell', 1); await b.click('.cell', 3);
     await a.waitFor(`!!document.querySelectorAll('.cell')[1].querySelector('.friends')`);
     assert.equal(await b.js(`document.querySelector('.roll').disabled`), true, 'the friend cannot roll in round 1');
+    assert.equal(await a.js(`document.querySelector('.roll').disabled`), true, 'the roller waits until the friend is ready');
+    assert.match(await a.text('.ready-roller'), /Waiting for: Bikash|Waiting for: /);
+    await b.click('.ready-btn');                                      // friend taps "I'm ready"
+    await a.waitFor(`!document.querySelector('.roll').disabled`);
+    assert.equal(await b.js(`document.querySelectorAll('.chip').length > 0 && document.querySelector('.ready-btn').classList.contains('on')`), true);
     await a.click('.roll');
     await Promise.all([a, b, c].map((t) => t.waitFor(`document.querySelectorAll('.count-badge').length === 6`, 10000)));
     const [da, db, dc] = await Promise.all([a.dice(), b.dice(), c.dice()]);
@@ -185,8 +190,10 @@ try {
     await a.click('.roll');                                           // "Next round" (host rolled round 1)
     await b.waitFor(`!!document.querySelector('.cell') && !document.querySelector('.cell').disabled`);
     await b.click('.chip-50'); await b.click('.cell', 0);
-    await b.waitFor(`!document.querySelector('.roll').disabled`);
     assert.equal(await a.js(`document.querySelector('.roll').disabled`), true, 'the host cannot roll in round 2');
+    assert.equal(await b.js(`document.querySelector('.roll').disabled`), true, 'the roller waits for the host to be ready');
+    await a.click('.ready-btn');
+    await b.waitFor(`!document.querySelector('.roll').disabled`);
     await b.click('.roll');
     await a.waitFor(`document.querySelectorAll('.count-badge').length === 6`, 10000);
   });
@@ -195,6 +202,21 @@ try {
     await b.click('.react', 1);
     await a.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
     await c.waitFor(`document.querySelector('.feed li')?.innerText.includes('Bikash')`);
+  });
+
+  await step('text chat: a typed message reaches the others; emoji reactions play a sound', async () => {
+    await new Promise((r) => setTimeout(r, 1000));                   // server rate limit between messages
+    await a.type('.chat-form input', 'Namaste <i>friends</i>');
+    await a.click('.chat-form button');
+    await b.waitFor(`[...document.querySelectorAll('.feed li')].some((li) => li.innerText.includes('Namaste <i>friends</i>'))`);
+    await c.waitFor(`[...document.querySelectorAll('.feed li')].some((li) => li.innerText.includes('Namaste <i>friends</i>'))`);
+    assert.equal(await b.js(`!document.querySelector('.feed li i:not(.spec)')`), true, 'text is shown as text, never as HTML');
+    // every reaction plays its own WebAudio sound on the receiving side; a throw would show up in the final error check
+    for (let i = 0; i < 6; i += 1) {
+      await new Promise((r) => setTimeout(r, 950));
+      await a.click('.react', i);
+    }
+    await b.waitFor(`document.querySelectorAll('.feed li').length >= 7`);
   });
 
   await step('tournament: 5 rounds with equal chips, final standings, play again', async () => {
@@ -215,9 +237,11 @@ try {
     await f.js(`document.querySelectorAll('.lobby-box')[1].querySelector('button').click()`);
     await f.waitFor(`document.querySelectorAll('.players li').length === 2`);
     for (let i = 1; i <= 5; i += 1) {
-      const isRoller = (t) => t.js(`document.querySelector('.roll').innerText.startsWith('Roll dice')`);
+      const isRoller = (t) => t.js(`!!document.querySelector('.ready-roller')`);
       const who = (await isRoller(d)) ? d : f;
       await who.click('.chip-100'); await who.click('.cell', 2);
+      const other = who === d ? f : d;
+      await other.click('.ready-btn');
       await who.waitFor(`!document.querySelector('.roll').disabled`);
       await who.click('.roll');
       await who.waitFor(`document.querySelectorAll('.count-badge').length === 6`, 10000);

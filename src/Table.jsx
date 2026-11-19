@@ -14,7 +14,7 @@ import { ShareResultButton } from './ShareBar.jsx';
 export default function Table(props) {
   const {
     dice, rollId, rolling, result, hint, bets, others = {}, balance, round,
-    chip, setChip, locked, countdown, watching, roundLabel, shareCtx, onPlace, onUndo, onClear, onRebet, onRoll,
+    chip, setChip, locked, countdown, watching, roundLabel, shareCtx, actionSlot, onPlace, onUndo, onClear, onRebet, onRoll,
     rollLabel, rollDisabled, canUndo, canClear, canRebet,
   } = props;
   const { t, rs, lang, faceName, faceAlt } = useT();
@@ -116,6 +116,8 @@ export default function Table(props) {
             <ShareResultButton build={() => ({ dice, net: watching ? undefined : result?.net, round, title: shareCtx.title, code: shareCtx.code })} />
           </div>
         )}
+
+        {!watching && actionSlot}
 
         {!watching && (
           <button className="roll" onClick={onRoll} disabled={rollDisabled}>

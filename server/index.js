@@ -90,6 +90,15 @@ function canRoll(room, player) {
   return player.id === room.hostId && !room.players.get(rollerOf(room))?.connected;
 }
 
+// Everyone who is connected, apart from the roller, has to tap "Ready" before the dice can be thrown
+// (the roller counts as ready by pressing Roll). The betting timer and "roll anyway" still work.
+function waitingFor(room) {
+  const roller = rollerOf(room);
+  return [...room.players.values()].filter((p) => p.connected && p.id !== roller && !p.ready);
+}
+
+const cleanText = (v) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+
 function advanceRoller(room) {
   const ids = [...room.players.keys()];
   if (ids.length === 0) return;
@@ -132,6 +141,7 @@ function publicState(room) {
       avatar: p.avatar,
       total: p.total,          // session profit / loss across all rounds
       wins: p.wins,
+      ready: !!p.ready,
     })),
   };
 }
@@ -232,6 +242,7 @@ function startNextRound(room) {
     if (sumBets(p.bets) > 0) p.lastBets = p.bets;
     p.bets = {};
     p.log = [];
+    p.ready = false;
     p.result = null;
   }
   broadcast(room);
@@ -424,6 +435,7 @@ const handlers = {
 
   bet(ws, msg, { room, player }) {
     if (room.phase !== 'betting') return fail(ws, 'betting-closed', 'Betting is closed for this round.');
+    if (player.ready) return fail(ws, 'ready-locked', 'You are ready. Tap Not ready to change your bets.');
     const amount = Number(msg.amount);
     if (!FACE_KEYS.includes(msg.face) || !CHIPS.includes(amount)) return fail(ws, 'invalid-bet', 'Invalid bet.');
     if (room.rules.limit && (player.bets[msg.face] ?? 0) + amount > room.rules.limit) return fail(ws, 'over-limit', `Limit is ${room.rules.limit} per figure.`);
@@ -436,7 +448,7 @@ const handlers = {
   },
 
   undo(ws, msg, { room, player }) {
-    if (room.phase !== 'betting' || player.log.length === 0) return;
+    if (room.phase !== 'betting' || player.log.length === 0 || player.ready) return;
     const { face, amount } = player.log.pop();
     player.balance += amount;
     player.bets[face] -= amount;
@@ -445,7 +457,7 @@ const handlers = {
   },
 
   clear(ws, msg, { room, player }) {
-    if (room.phase !== 'betting') return;
+    if (room.phase !== 'betting' || player.ready) return;
     player.balance += sumBets(player.bets);
     player.bets = {};
     player.log = [];
@@ -453,7 +465,7 @@ const handlers = {
   },
 
   rebet(ws, msg, { room, player }) {
-    if (room.phase !== 'betting' || sumBets(player.bets) > 0) return;
+    if (room.phase !== 'betting' || sumBets(player.bets) > 0 || player.ready) return;
     const total = sumBets(player.lastBets);
     if (total === 0) return;
     if (total > player.balance) return fail(ws, 'no-funds-rebet', 'Not enough balance to repeat the last bets.');
@@ -467,7 +479,7 @@ const handlers = {
 
   rebuy(ws, msg, { room, player }) {
     if (room.rules.rounds) return fail(ws, 'no-rebuy', 'Chips cannot be refilled during a tournament.');
-    if (room.phase !== 'betting' || sumBets(player.bets) > 0 || player.balance >= CHIPS[0]) return;
+    if (room.phase !== 'betting' || sumBets(player.bets) > 0 || player.balance >= CHIPS[0] || player.ready) return;
     player.balance = START_BANKROLL;
     broadcast(room);
   },
@@ -481,6 +493,28 @@ const handlers = {
     const out = { t: 'say', n: room.sayN, from: player.id, name: player.name, id: msg.id };
     for (const p of room.players.values()) send(p.ws, out);
     for (const w of room.watchers.values()) send(w.ws, out);
+  },
+
+  ready(ws, msg, { room, player }) {
+    if (room.phase !== 'betting') return;
+    const on = msg.on === true;
+    if (player.ready === on) return;
+    player.ready = on;
+    broadcast(room);
+  },
+
+  // Free-text chat. Plain text only (the client never renders HTML), short, and rate limited.
+  chat(ws, msg, { room, player }) {
+    const text = cleanText(msg.text);
+    if (!text) return;
+    const now = Date.now();
+    if (now - (player.lastSay ?? 0) < 700) return;
+    player.lastSay = now;
+    room.sayN = (room.sayN ?? 0) + 1;
+    const out = { t: 'say', n: room.sayN, from: player.id, name: player.name, text, watcher: !room.players.has(player.id) };
+    for (const p of room.players.values()) send(p.ws, out);
+    for (const w of room.watchers.values()) send(w.ws, out);
+    bump('chats');
   },
 
   rules(ws, msg, { room, player }) {
@@ -510,7 +544,7 @@ const handlers = {
     room.history = [];
     room.phase = 'betting';
     room.rollerId = room.hostId;
-    for (const p of room.players.values()) { p.balance = START_BANKROLL; p.total = 0; p.wins = 0; p.bets = {}; p.lastBets = {}; p.log = []; p.result = null; }
+    for (const p of room.players.values()) { p.balance = START_BANKROLL; p.total = 0; p.wins = 0; p.bets = {}; p.lastBets = {}; p.log = []; p.result = null; p.ready = false; }
     broadcast(room);
   },
 
@@ -540,6 +574,8 @@ const handlers = {
     if (!canRoll(room, player)) return fail(ws, 'not-roller', 'It is not your turn to roll the dice.');
     if (room.phase !== 'betting') return;
     if (!hasStake(room)) return fail(ws, 'need-bet', 'Someone needs to place a bet before rolling.');
+    const waiting = waitingFor(room);
+    if (waiting.length > 0 && msg.force !== true) return fail(ws, 'not-ready', `Waiting for ${waiting.map((p) => p.name).join(', ')} to be ready.`);
     rollDice(room);
   },
 
@@ -638,7 +674,7 @@ wss.on('connection', (ws, req) => {
 
     const needsRoom = !['create', 'join', 'resume', 'leave'].includes(msg.t);
     if (needsRoom && !ws.ctx) return fail(ws, 'not-in-room', 'You are not in a room.');
-    if (ws.ctx?.watcher && !['say', 'leave', 'voice', 'rtc'].includes(msg.t)) return fail(ws, 'watch-only', 'Spectators can only watch and send reactions.');
+    if (ws.ctx?.watcher && !['say', 'chat', 'leave', 'voice', 'rtc'].includes(msg.t)) return fail(ws, 'watch-only', 'Spectators can only watch and send reactions.');
     handlers[msg.t](ws, msg, ws.ctx);
   });
 

@@ -4,6 +4,7 @@ import Table from './Table.jsx';
 import { ChatPanel, SayBubbles } from './Chat.jsx';
 import VoicePanel from './VoicePanel.jsx';
 import { InviteShare, ShareResultButton } from './ShareBar.jsx';
+import ReadyBar from './ReadyBar.jsx';
 import { useVoice } from './voice.js';
 import { RecentRolls, FaceFrequency, Standings } from './Panels.jsx';
 import { CHIPS, START_BANKROLL, sumBets } from './faces.js';
@@ -284,8 +285,9 @@ function RoomView({ room }) {
     rollDisabled = !isRoller || !connected;
     onRoll = () => send({ t: 'next' });
   } else {
-    rollLabel = isRoller ? t('roll.go') : t('roll.theyRoll', { name: roller?.name ?? '' });
-    rollDisabled = !isRoller || !anyStake || !connected;
+    const notReady = state.players.filter((p) => p.connected && p.id !== rollerId && !p.ready).length;
+    rollLabel = isRoller ? (notReady ? t('ready.waiting', { n: notReady }) : t('roll.go')) : t('roll.theyRoll', { name: roller?.name ?? '' });
+    rollDisabled = !isRoller || !anyStake || !connected || notReady > 0;
     onRoll = () => send({ t: 'roll' });
   }
 
@@ -295,7 +297,7 @@ function RoomView({ room }) {
       : phase !== 'betting' ? ''
         : isRoller
           ? (anyStake ? t('room.hintHostReady') : t('room.hintHostWait'))
-          : (totalBet > 0 ? t('room.hintReady') : t('solo.hintIdle'));
+          : (me?.ready ? t('room.hintReady') : t('ready.tap'));
 
   const history = state.history.map((h) => ({ id: `${h.round}`, dice: h.dice, round: h.round, top: h.results?.[0] }));
   const broke = connected && phase === 'betting' && totalBet === 0 && me.balance < CHIPS[0] && !tour;
@@ -311,6 +313,7 @@ function RoomView({ room }) {
       <Table
         dice={state.dice} rollId={state.rollId} rolling={rolling} result={result} hint={hint}
         bets={me.bets} others={others} balance={me.balance} round={state.round} countdown={left} roundLabel={roundLabel} shareCtx={{ title: state.title, code: state.code }}
+        actionSlot={phase === 'betting' ? <ReadyBar state={state} you={you} rollerId={rollerId} isRoller={isRoller} anyStake={anyStake} connected={connected} send={send} /> : null}
         chip={chip} setChip={setChip} locked={phase !== 'betting' || !connected}
         onPlace={(face) => send({ t: 'bet', face, amount: chip })}
         onUndo={() => send({ t: 'undo' })} onClear={() => send({ t: 'clear' })} onRebet={() => send({ t: 'rebet' })}

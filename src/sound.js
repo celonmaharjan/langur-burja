@@ -90,7 +90,7 @@ function knock(delay, vol = 0.12) {
 }
 
 // A short "whoosh" as the dice leave the hand.
-function whoosh() {
+function whoosh(vol = 0.05) {
   const c = audio();
   if (!c || muted) return;
   const len = Math.floor(c.sampleRate * 0.35);
@@ -104,12 +104,27 @@ function whoosh() {
   f.frequency.setValueAtTime(500, c.currentTime);
   f.frequency.exponentialRampToValueAtTime(2200, c.currentTime + 0.3);
   const g = c.createGain();
-  g.gain.value = 0.05;
+  g.gain.value = vol;
   src.connect(f).connect(g).connect(c.destination);
   src.start();
 }
 
+// One short sound per reaction, so a 👏 or a 😂 can be heard as well as seen.
+const LOUD = 2.6;                                  // reactions are meant to be noticed over the voice chat
+const REACT_SOUNDS = {
+  clap() { [0, 95, 190, 270].forEach((d) => knock(d, 0.13 * LOUD)); },
+  fire() { whoosh(0.05 * LOUD); tone(280, 380, { type: 'sawtooth', vol: 0.025 * LOUD, to: 900 }); },
+  laugh() { [0, 120, 240, 360].forEach((d, i) => tone(i % 2 ? 560 : 700, 90, { type: 'square', vol: 0.025 * LOUD, delay: d })); },
+  cry() { tone(520, 420, { type: 'triangle', vol: 0.05 * LOUD, to: 260 }); tone(440, 520, { type: 'triangle', vol: 0.04 * LOUD, delay: 260, to: 200 }); },
+  wow() { tone(260, 380, { vol: 0.05 * LOUD, to: 980 }); },
+  luck() { [1046, 1318, 1568].forEach((f, i) => tone(f, 420, { vol: 0.04 * LOUD, delay: i * 110 })); },
+  text() { tone(760, 70, { type: 'triangle', vol: 0.035 * LOUD, to: 1100 }); },
+};
+
 export const sfx = {
+  say(id) { (REACT_SOUNDS[id] ?? REACT_SOUNDS.text)(); },
+  ready() { tone(640, 70, { type: 'triangle', vol: 0.08 }); },
+  allReady() { [660, 880].forEach((f, i) => tone(f, 160, { vol: 0.12, delay: i * 110 })); },
   chip() {
     if (play('chip')) return;
     tone(660, 45, { type: 'triangle', vol: 0.04 });

@@ -472,3 +472,23 @@ html { -webkit-text-size-adjust: 100%; }
 .tour-final .winner { font-size: 22px; font-weight: 800; color: var(--gold-2); margin: 4px 0 14px; }
 .tour-final .standings { max-width: 520px; margin: 0 auto 14px; text-align: left; }
 .tour-actions { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* ready bar, text chat */
+.readybar { display: grid; gap: 10px; margin: 4px 0 12px; justify-items: center; }
+.ready-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ready-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 13px; background: rgba(0,0,0,.28); border: 1px solid var(--line); }
+.ready-chip.ok { border-color: #4cc38a; color: #bff0d6; }
+.ready-chip.wait { color: var(--muted); }
+.ready-chip.roller { border-color: var(--gold); color: var(--gold-2); }
+.ready-btn { min-height: 48px; padding: 0 22px; border-radius: 14px; border: 2px solid var(--gold); background: transparent; color: var(--gold-2); font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.ready-btn:not(.on) { background: linear-gradient(180deg, var(--gold-2), var(--gold)); color: #1b1305; }
+.ready-btn.on { border-color: #4cc38a; color: #bff0d6; }
+.ready-roller { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.all-ready { display: inline-flex; align-items: center; gap: 6px; color: #7be0ad; font-weight: 600; }
+.feed { max-height: 190px; overflow-y: auto; }
+.feed .msg { overflow-wrap: anywhere; }
+.feed .spec { color: var(--muted); font-size: 12px; font-style: normal; }
+.chat-form { display: flex; gap: 8px; margin-top: 10px; }
+.chat-form input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: inherit; font: inherit; }
+.chat-form .primary { min-width: 48px; min-height: 44px; }
+.bubble { max-width: min(80vw, 320px); overflow-wrap: anywhere; }
